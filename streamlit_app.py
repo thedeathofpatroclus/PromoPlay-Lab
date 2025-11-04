@@ -1,157 +1,69 @@
-import pandas as pd
 import streamlit as st
-from streamlit_extras.metric_cards import style_metric_cards
+import pandas as pd
 
-# -------------------------------
-# 1. Load and Merge Data
-# -------------------------------
-def load_data():
-    trip_df = pd.read_csv("TRIP_FILE.csv")
-    patron_df = pd.read_csv("PATRON_DATABASE.csv")
-    merged_df = pd.merge(trip_df, patron_df, on=['PATRON_ID', 'PROP_NUM'], how='inner')
-    return merged_df
+# Page settings
+st.set_page_config(page_title="PromoPlay Lab – Chickasaw Nation", page_icon="🎰")
 
-# -------------------------------
-# 2. Segment Patrons
-# -------------------------------
-def segment_patrons(df):
-    df['Value_Tier'] = pd.qcut(df['COIN_IN'], q=[0, 0.2, 0.6, 1.0], labels=['Low', 'Mid', 'High'])
-    df['Freq_Tier'] = pd.cut(df['TRIPS'], bins=[0, 2, 5, 30], labels=['Rare', 'Occasional', 'Frequent'])
-    return df[['PATRON_ID', 'PROP_NUM', 'TRIPS', 'COIN_IN', 'Value_Tier', 'Freq_Tier']]
+# Define sample patron segments
+segments = {
+    "High Value Frequent": {"trips": 14, "coin_in": 38000},
+    "High Value Infrequent": {"trips": 3, "coin_in": 17800},
+    "Mid Value": {"trips": 2.3, "coin_in": 2270},
+    "Low Value": {"trips": 1.4, "coin_in": 275},
+}
 
-# -------------------------------
-# 3. Define Hardcoded Assumptions
-# -------------------------------
-def get_promotion_costs():
-    return {
-        '$50 Free Play': 50,
-        '$100 Free Play': 100,
-        'Hotel Comp': 120,
-        'SMS Campaign': 2,
-        'VIP Event Invite': 250
-    }
+# Define promotion impact multipliers
+promotions = {
+    "$50 Free Play": {"trips_mult": 1.3, "coin_in_mult": 1.2, "cost": 50},
+    "$100 Free Play": {"trips_mult": 1.6, "coin_in_mult": 1.5, "cost": 100},
+    "Hotel Comp": {"trips_mult": 1.2, "coin_in_mult": 1.1, "cost": 75},
+    "SMS Campaign": {"trips_mult": 1.1, "coin_in_mult": 1.05, "cost": 5},
+    "VIP Event Invite": {"trips_mult": 1.4, "coin_in_mult": 1.3, "cost": 120},
+}
 
-def get_response_rates():
-    return {
-        ('High', 'Frequent'): {'$50 Free Play': 0.4, '$100 Free Play': 0.45, 'Hotel Comp': 0.3, 'SMS Campaign': 0.5, 'VIP Event Invite': 0.35},
-        ('High', 'Occasional'): {'$50 Free Play': 0.3, '$100 Free Play': 0.35, 'Hotel Comp': 0.25, 'SMS Campaign': 0.4, 'VIP Event Invite': 0.3},
-        ('High', 'Rare'): {'$50 Free Play': 0.2, '$100 Free Play': 0.25, 'Hotel Comp': 0.2, 'SMS Campaign': 0.35, 'VIP Event Invite': 0.25},
-        ('Mid', 'Frequent'): {'$50 Free Play': 0.3, '$100 Free Play': 0.35, 'Hotel Comp': 0.25, 'SMS Campaign': 0.4, 'VIP Event Invite': 0.3},
-        ('Mid', 'Occasional'): {'$50 Free Play': 0.25, '$100 Free Play': 0.3, 'Hotel Comp': 0.2, 'SMS Campaign': 0.35, 'VIP Event Invite': 0.2},
-        ('Mid', 'Rare'): {'$50 Free Play': 0.15, '$100 Free Play': 0.2, 'Hotel Comp': 0.15, 'SMS Campaign': 0.25, 'VIP Event Invite': 0.15},
-        ('Low', 'Frequent'): {'$50 Free Play': 0.2, '$100 Free Play': 0.25, 'Hotel Comp': 0.2, 'SMS Campaign': 0.3, 'VIP Event Invite': 0.2},
-        ('Low', 'Occasional'): {'$50 Free Play': 0.15, '$100 Free Play': 0.2, 'Hotel Comp': 0.15, 'SMS Campaign': 0.2, 'VIP Event Invite': 0.15},
-        ('Low', 'Rare'): {'$50 Free Play': 0.15, '$100 Free Play': 0.2, 'Hotel Comp': 0.1, 'SMS Campaign': 0.2, 'VIP Event Invite': 0.1}
-    }
+# Sidebar
+st.sidebar.title("PromoPlay Lab 🎯")
+st.sidebar.markdown("A drag-and-drop simulator for strategic promotions.")
+segment_choice = st.sidebar.selectbox("Select Patron Segment", list(segments.keys()))
+promo_choices = st.sidebar.multiselect("Choose Promotions", list(promotions.keys()))
 
-# -------------------------------
-# 4. Calculate Average LTV
-# -------------------------------
-def calculate_average_ltv(df, value_tier, freq_tier, assumed_retention_months=12):
-    segment_df = df[(df['Value_Tier'] == value_tier) & (df['Freq_Tier'] == freq_tier)]
-    if segment_df.empty:
-        return 0
-    avg_monthly_coin_in = segment_df['COIN_IN'].mean()
-    hold_percentage = 0.08
-    ltv = avg_monthly_coin_in * hold_percentage * assumed_retention_months
-    return ltv
+# Base metrics
+base = segments[segment_choice]
+total_trips = base["trips"]
+total_coin_in = base["coin_in"]
+total_cost = 0
 
-# -------------------------------
-# 5. Calculate Expected ROI
-# -------------------------------
-def calculate_roi(df, value_tier, freq_tier, promo_type, campaign_size, response_rate_override=None):
-    promo_costs = get_promotion_costs()
-    response_rates = get_response_rates()
+# Apply promotions
+for promo in promo_choices:
+    promo_data = promotions[promo]
+    total_trips *= promo_data["trips_mult"]
+    total_coin_in *= promo_data["coin_in_mult"]
+    total_cost += promo_data["cost"]
 
-    cost_per_patron = promo_costs[promo_type]
-    default_response_rate = response_rates.get((value_tier, freq_tier), {}).get(promo_type, 0)
+# Estimate ROI
+roi = (total_coin_in * 0.05 - total_cost) / total_cost if total_cost > 0 else 0
 
-    response_rate = response_rate_override if response_rate_override is not None else default_response_rate
+# Display
+st.title("🎰 Casino Promo Strategy Simulator")
+st.subheader(f"📊 Segment: `{segment_choice}`")
 
-    if response_rate == 0:
-        return None
+col1, col2 = st.columns(2)
+col1.metric("Projected Trips", f"{total_trips:.1f}")
+col2.metric("Projected Coin-In", f"${total_coin_in:,.2f}")
 
-    avg_ltv = calculate_average_ltv(df, value_tier, freq_tier)
+col3, col4 = st.columns(2)
+col3.metric("Promotion Cost", f"${total_cost:,.2f}")
+col4.metric("Estimated ROI", f"{roi:.2f}x")
 
-    expected_responders = campaign_size * response_rate
-    incremental_revenue = expected_responders * avg_ltv
-    total_promo_cost = campaign_size * cost_per_patron
+st.divider()
+st.markdown("#### 🎯 Promotion Details")
+if promo_choices:
+    for promo in promo_choices:
+        st.write(
+            f"- **{promo}**: +{int((promotions[promo]['coin_in_mult'] - 1)*100)}% coin-in, "
+            f"Cost = ${promotions[promo]['cost']}"
+        )
+else:
+    st.info("Choose one or more promotions from the sidebar to simulate results.")
 
-    roi = (incremental_revenue - total_promo_cost) / total_promo_cost if total_promo_cost != 0 else 0
-
-    return {
-        'Average_LTV': avg_ltv,
-        'Expected_Responders': expected_responders,
-        'Incremental_Revenue': incremental_revenue,
-        'Total_Promo_Cost': total_promo_cost,
-        'ROI': roi
-    }
-
-# -------------------------------
-# 6. Streamlit App
-# -------------------------------
-def main():
-    st.set_page_config(page_title="PromoPlay Lab 🎯", layout="wide")
-    st.markdown("""
-        <style>
-        .purple-gold-box {
-            background-color: #4B0082;
-            color: gold;
-            padding: 2rem;
-            border-radius: 1rem;
-            text-align: center;
-            font-size: 1.2rem;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.sidebar.title("PromoPlay Lab 🎯")
-    st.sidebar.markdown("A simulator for strategic casino promotions.")
-
-    merged_df = load_data()
-    segmented_df = segment_patrons(merged_df)
-
-    st.title("🎰 Casino Promo Strategy Simulator")
-
-    value_tier = st.sidebar.selectbox("Select Value Tier", ['High', 'Mid', 'Low'])
-    freq_tier = st.sidebar.selectbox("Select Frequency Tier", ['Frequent', 'Occasional', 'Rare'])
-    promo_type = st.sidebar.selectbox("Choose Promotions", list(get_promotion_costs().keys()))
-    campaign_size = st.sidebar.slider("Number of patrons to target", 100, 10000, 1000, step=100)
-
-    default_rate = int(get_response_rates().get((value_tier, freq_tier), {}).get(promo_type, 0) * 100)
-    sensitivity = st.sidebar.slider("📊 Adjust Response Rate (%)", 0, 100, default_rate)
-
-    results = calculate_roi(segmented_df, value_tier, freq_tier, promo_type, campaign_size, response_rate_override=sensitivity/100)
-
-    st.markdown(f"### 📊 Segment: `{value_tier} Value / {freq_tier} Frequency`")
-
-    if results:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown(f"""
-            <div class="purple-gold-box">
-                Projected Trips<br><strong>{segmented_df[(segmented_df['Value_Tier'] == value_tier) & (segmented_df['Freq_Tier'] == freq_tier)]['TRIPS'].mean():.1f}</strong>
-            </div>""", unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"""
-            <div class="purple-gold-box">
-                Projected Coin-In<br><strong>${segmented_df[(segmented_df['Value_Tier'] == value_tier) & (segmented_df['Freq_Tier'] == freq_tier)]['COIN_IN'].sum():,.2f}</strong>
-            </div>""", unsafe_allow_html=True)
-        with col3:
-            st.markdown(f"""
-            <div class="purple-gold-box">
-                Estimated ROI<br><strong>{results['ROI']:.2f}x</strong>
-            </div>""", unsafe_allow_html=True)
-
-        st.divider()
-        st.subheader("🎯 Promotion Details")
-        st.write(f"**Average LTV:** ${results['Average_LTV']:.2f}")
-        st.write(f"**Expected Responders:** {results['Expected_Responders']:.0f} patrons")
-        st.write(f"**Incremental Revenue:** ${results['Incremental_Revenue']:.2f}")
-        st.write(f"**Total Promotion Cost:** ${results['Total_Promo_Cost']:.2f}")
-
-    else:
-        st.error("No valid ROI calculation for this segment and promotion.")
-
-if __name__ == "__main__":
-    main()
+st.caption("Built by MIS 3213 Group 8 for the Chickasaw Nation Casino Strategy Competition 🧠")
